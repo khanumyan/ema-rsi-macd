@@ -18,7 +18,7 @@ class TelegramService
 
     /**
      * Отправка сигнала в Telegram
-     * 
+     *
      * @param array $signal Данные сигнала
      * @param string $symbol Символ (BTCUSDT)
      * @param string $strategy Название стратегии
@@ -33,7 +33,7 @@ class TelegramService
 
         try {
             $message = $this->formatSignalMessage($signal, $symbol, $strategy);
-            
+
             $response = Http::timeout(10)->post("https://api.telegram.org/bot{$this->botToken}/sendMessage", [
                 'chat_id' => $this->chatId,
                 'text' => $message,
@@ -87,20 +87,20 @@ class TelegramService
         $message = "<b>{$emoji} {$type} Signal - {$symbol}</b>\n";
         $message .= "<b>Strategy:</b> {$strategy}\n";
         $message .= "<b>Strength:</b> {$strengthEmoji} {$strength}\n\n";
-        
+
         $message .= "<b>Price:</b> \${$price}\n";
         $message .= "<b>RSI:</b> {$rsi}\n";
         $message .= "<b>EMA(20):</b> \${$ema}\n";
         $message .= "<b>MACD:</b> {$macd}\n";
         $message .= "<b>MACD Histogram:</b> {$macdHist}\n\n";
-        
+
         $message .= "<b>Stop Loss:</b> \${$stopLoss}\n";
         $message .= "<b>Take Profit:</b> \${$takeProfit}\n\n";
-        
+
         $message .= "<b>Probabilities:</b>\n";
         $message .= "  BUY: {$longProb}%\n";
         $message .= "  SELL: {$shortProb}%\n\n";
-        
+
         if ($reason) {
             $message .= "<b>Reason:</b> {$reason}\n";
         }

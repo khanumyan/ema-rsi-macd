@@ -188,3 +188,4 @@ tail -f storage/logs/laravel.log | grep "ERROR"
 
 
 
+
