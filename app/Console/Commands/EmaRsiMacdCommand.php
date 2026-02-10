@@ -7,6 +7,7 @@ use App\Services\CryptoAnalysisService;
 use App\Services\TelegramService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Carbon\Carbon;
 use Exception;
 
@@ -34,6 +35,7 @@ class EmaRsiMacdCommand extends Command
     private CryptoAnalysisService $analysisService;
     private TelegramService $telegramService;
     private array $analysisSignals = [];
+    private string $flowId;
 
     public function __construct(
         CryptoAnalysisService $analysisService,
@@ -49,12 +51,16 @@ class EmaRsiMacdCommand extends Command
      */
     public function handle(): int
     {
+        // Генерируем UUID потока для этого запуска команды
+        $this->flowId = (string) Str::uuid();
+
         $startTime = microtime(true);
         $commandStart = Carbon::now();
 
         $this->info('🚀 Запуск анализа EMA+RSI+MACD стратегии...');
         Log::info('=== EMA+RSI+MACD Command Started ===', [
             'started_at' => $commandStart->toDateTimeString(),
+            'flow_id' => $this->flowId,
             'options' => [
                 'interval' => $this->option('interval'),
                 'limit' => $this->option('limit'),
@@ -150,6 +156,9 @@ class EmaRsiMacdCommand extends Command
 
         // Сохранение всех сигналов в базу данных
         $this->saveAllSignalsToDatabase();
+
+        // Фильтрация сигналов текущего потока по дополнительным критериям
+        $this->filterFlowSignals();
 
         $endTime = microtime(true);
         $executionTime = round($endTime - $startTime, 2);
@@ -459,6 +468,10 @@ class EmaRsiMacdCommand extends Command
             return false; // Не сохраняем, если ни одна из вероятностей не равна 100
         }
 
+        if ($signal['type'] === 'HOLD') {
+            return false;
+        }
+
         // Проверяем, был ли уже сигнал для этого символа с таким же типом за последние 30 минут
         $cutoffTime = Carbon::now()->subMinutes(30);
         $existingSignal = CryptoSignal::where('symbol', $symbol)
@@ -478,6 +491,7 @@ class EmaRsiMacdCommand extends Command
 
         $savedSignal = CryptoSignal::saveSignal([
             // Основные данные
+            'flow_id' => $this->flowId,
             'symbol' => $symbol,
             'strategy' => 'EMA+RSI+MACD',
             'type' => $signal['type'], // BUY/SELL/HOLD
@@ -534,5 +548,91 @@ class EmaRsiMacdCommand extends Command
         ]);
 
         return true; // Сигнал успешно сохранен
+    }
+
+    /**
+     * Фильтрация сигналов текущего потока по заданным критериям
+     *
+     * Оставляем только сигналы, которые проходят SQL-условия из задачи,
+     * остальные сигналы с тем же flow_id удаляем из базы.
+     */
+    private function filterFlowSignals(): void
+    {
+        $this->info('🧹 Фильтрация сигналов текущего потока по дополнительным критериям...');
+        Log::info('EMA+RSI+MACD: Starting flow filter phase', [
+            'flow_id' => $this->flowId,
+        ]);
+
+        // Строим запрос, полностью соответствующий заданной SQL
+        $matchingSignalsQuery = CryptoSignal::query()
+            ->where('flow_id', $this->flowId)
+            ->whereNotNull('atr')
+            ->whereNotNull('ema')
+            ->whereNotNull('macd_histogram')
+            ->whereNotNull('take_profit')
+            ->where('price', '>', 0)
+            ->where('atr', '>', 0)
+            // 📏 TP distance filter: (ABS((price - take_profit) / price) * 100) <= 3
+            ->whereRaw('(ABS((price - take_profit) / price) * 100) <= 3')
+            ->where(function ($q) {
+                // ================= BUY =================
+                $q->where(function ($buy) {
+                    $buy->where('type', 'BUY')
+                        // 1️⃣ RSI: rsi > 48 AND rsi < 60
+                        ->where('rsi', '>', 48)
+                        ->where('rsi', '<', 60)
+                        // 2️⃣ MACD histogram / ATR: (macd_histogram / atr) >= 0.25
+                        ->whereRaw('(macd_histogram / atr) >= 0.25')
+                        // 3️⃣ EMA distance % ATR: (ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5
+                        ->whereRaw('(ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5')
+                        // 4️⃣ ATR %: ((atr / price) * 100) BETWEEN 0.3 AND 3.0
+                        ->whereRaw('((atr / price) * 100) BETWEEN 0.3 AND 3.0')
+                        // 5️⃣ Score difference: (long_score - short_score) BETWEEN 10 AND 20
+                        ->whereRaw('(long_score - short_score) BETWEEN 10 AND 20');
+                })
+                // ================= SELL =================
+                ->orWhere(function ($sell) {
+                    $sell->where('type', 'SELL')
+                        // 1️⃣ RSI: rsi BETWEEN 40 AND 52
+                        ->whereBetween('rsi', [40, 52])
+                        // 2️⃣ MACD histogram / ATR: (ABS(macd_histogram) / atr) >= 0.25
+                        ->whereRaw('(ABS(macd_histogram) / atr) >= 0.25')
+                        // 3️⃣ EMA distance % ATR: (ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5
+                        ->whereRaw('(ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5')
+                        // 4️⃣ ATR %: ((atr / price) * 100) BETWEEN 0.3 AND 3.0
+                        ->whereRaw('((atr / price) * 100) BETWEEN 0.3 AND 3.0')
+                        // 5️⃣ Score difference: (short_score - long_score) BETWEEN 10 AND 20
+                        ->whereRaw('(short_score - long_score) BETWEEN 10 AND 20');
+                });
+            });
+
+        $matchingIds = $matchingSignalsQuery->pluck('id')->all();
+
+        $totalInFlow = CryptoSignal::where('flow_id', $this->flowId)->count();
+        $matchedCount = count($matchingIds);
+
+        // Если ни один сигнал не прошел фильтр — удаляем все сигналы этого потока
+        if ($matchedCount === 0) {
+            CryptoSignal::where('flow_id', $this->flowId)->delete();
+            $this->warn("⚠️  Ни один сигнал не прошёл фильтр, удалены все {$totalInFlow} сигналов потока");
+            Log::info('EMA+RSI+MACD: Flow filter - no matches, all signals deleted', [
+                'flow_id' => $this->flowId,
+                'total_in_flow' => $totalInFlow,
+            ]);
+            return;
+        }
+
+        // Удаляем все сигналы этого потока, которые НЕ попали в выборку
+        $deletedCount = CryptoSignal::where('flow_id', $this->flowId)
+            ->whereNotIn('id', $matchingIds)
+            ->delete();
+
+        $this->info("🧾 Фильтр потока: осталось {$matchedCount}, удалено {$deletedCount} из {$totalInFlow}");
+        Log::info('EMA+RSI+MACD: Flow filter completed', [
+            'flow_id' => $this->flowId,
+            'total_in_flow' => $totalInFlow,
+            'matched' => $matchedCount,
+            'deleted' => $deletedCount,
+        ]);
     }
 }

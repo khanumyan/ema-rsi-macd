@@ -292,79 +292,71 @@ class CryptoAnalysisService
         $macdSignalLine = $macd['signal'];
         $macdHist = $macd['histogram'];
 
-        // Защита от деления на ноль
-        if ($atr <= 0) {
-            $atr = $price * 0.01; // Fallback: 1% от цены
-        }
-
-        // ===== НОРМАЛИЗАЦИЯ ЧЕРЕЗ ATR =====
-        // MACD histogram в долях ATR
-        $macdHistAtr = $macdHist / $atr;
-        
-        // EMA distance в долях ATR
-        $emaDistance = abs($price - $ema20);
-        $emaDistanceAtr = $emaDistance / $atr;
-        
-        // ATR в процентах от цены
-        $atrPct = ($atr / $price) * 100;
-
-        // Инициализация баллов (для обратной совместимости и score difference)
+        // Инициализация баллов
         $longScore = 0;
         $shortScore = 0;
 
-        // ===== БАЛЛЬНАЯ СИСТЕМА (для расчета score difference) =====
-        // BUY баллы
-        if ($price > $ema20 && $ema20 > $ema50) {
-            $longScore += 30;
+        // ===== BUY CONDITIONS =====
+        // 1. Основное условие: Цена > EMA20 и EMA20 > EMA50 и MACD > 0 и Histogram > 0 и RSI < 70
+        if ($price > $ema20 && $ema20 > $ema50 && $macdLine > 0 && $macdHist > 0 && $rsi < 70) {
+            $longScore += 40; // Базовые 40 баллов
+
+            // Дополнительные баллы за импульс:
+            // Если RSI 40-60 и |Histogram| > 0.5: +30 баллов (сильный импульс)
+            if ($rsi >= 40 && $rsi <= 60 && abs($macdHist) > 0.5) {
+                $longScore += 30;
+            }
+            // Если RSI > 30 и |Histogram| > 0.2: +15 баллов (средний импульс)
+            elseif ($rsi > 30 && abs($macdHist) > 0.2) {
+                $longScore += 15;
+            }
         }
-        if ($macdLine > 0 && $macdHist > 0) {
-            $longScore += 30;
-        }
-        if ($rsi >= 48 && $rsi <= 60) {
+        // 2. Или просто: цена > EMA20 и EMA20 > EMA50 (+20 баллов)
+        elseif ($price > $ema20 && $ema20 > $ema50) {
             $longScore += 20;
         }
+
+        // 3. RSI ≤ 30 (+20 баллов) - перепроданность
+        if ($rsi <= 30) {
+            $longScore += 20;
+        }
+
+        // 4. MACD Histogram > 0 и MACD Line > Signal (+10 баллов) - бычье пересечение
         if ($macdHist > 0 && $macdLine > $macdSignalLine) {
-            $longScore += 20;
+            $longScore += 10;
         }
 
-        // SELL баллы
-        if ($price < $ema20 && $ema20 < $ema50) {
-            $shortScore += 30;
+        // ===== SELL CONDITIONS =====
+        // 1. Основное условие: Цена < EMA20 и EMA20 < EMA50 и MACD < 0 и Histogram < 0 и RSI > 30
+        if ($price < $ema20 && $ema20 < $ema50 && $macdLine < 0 && $macdHist < 0 && $rsi > 30) {
+            $shortScore += 40; // Базовые 40 баллов
+
+            // Дополнительные баллы за импульс:
+            // Если RSI 40-60 и |Histogram| > 0.5: +30 баллов
+            if ($rsi >= 40 && $rsi <= 60 && abs($macdHist) > 0.5) {
+                $shortScore += 30;
+            }
+            // Если RSI < 70 и |Histogram| > 0.2: +15 баллов
+            elseif ($rsi < 70 && abs($macdHist) > 0.2) {
+                $shortScore += 15;
+            }
         }
-        if ($macdLine < 0 && $macdHist < 0) {
-            $shortScore += 30;
-        }
-        if ($rsi >= 40 && $rsi <= 52) {
+        // 2. Или просто: цена < EMA20 и EMA20 < EMA50 (+20 баллов)
+        elseif ($price < $ema20 && $ema20 < $ema50) {
             $shortScore += 20;
         }
+
+        // 3. RSI ≥ 70 (+20 баллов) - перекупленность
+        if ($rsi >= 70) {
+            $shortScore += 20;
+        }
+
+        // 4. MACD Histogram < 0 и MACD Line < Signal (+10 баллов) - медвежье пересечение
         if ($macdHist < 0 && $macdLine < $macdSignalLine) {
-            $shortScore += 20;
+            $shortScore += 10;
         }
 
-        // Score difference
-        $scoreDiff = $longScore - $shortScore;
-
-        // ===== BUY CONDITIONS (через ATR) =====
-        $buyConditions = [
-            'rsi' => ($rsi >= 48 && $rsi <= 60),
-            'macd_hist_atr' => ($macdHistAtr >= 0.25),
-            'ema_distance_atr' => ($emaDistanceAtr >= 0.5 && $emaDistanceAtr <= 1.5),
-            'atr_pct' => ($atrPct >= 0.3 && $atrPct <= 3.0),
-            'score_diff' => ($scoreDiff >= 10 && $scoreDiff <= 20),
-        ];
-        $buyAllConditionsMet = array_reduce($buyConditions, fn($carry, $condition) => $carry && $condition, true);
-
-        // ===== SELL CONDITIONS (через ATR) =====
-        $sellConditions = [
-            'rsi' => ($rsi >= 40 && $rsi <= 52),
-            'macd_hist_atr' => (abs($macdHist) / $atr >= 0.25),
-            'ema_distance_atr' => ($emaDistanceAtr >= 0.5 && $emaDistanceAtr <= 1.5),
-            'atr_pct' => ($atrPct >= 0.3 && $atrPct <= 3.0),
-            'score_diff' => (($shortScore - $longScore) >= 10 && ($shortScore - $longScore) <= 20),
-        ];
-        $sellAllConditionsMet = array_reduce($sellConditions, fn($carry, $condition) => $carry && $condition, true);
-
-        // Нормализация баллов в вероятности (для обратной совместимости)
+        // Нормализация баллов в вероятности
         $totalScore = $longScore + $shortScore;
         $longProb = $totalScore > 0
             ? round(($longScore / $totalScore) * 100)
@@ -373,11 +365,11 @@ class CryptoAnalysisService
             ? round(($shortScore / $totalScore) * 100)
             : 50;
 
-        // Определение сигнала на основе новых критериев
+        // Определение сигнала
         $signal = 'HOLD';
-        if ($buyAllConditionsMet) {
+        if ($longProb > $shortProb && $longProb > 50) {
             $signal = 'BUY';
-        } elseif ($sellAllConditionsMet) {
+        } elseif ($shortProb > $longProb && $shortProb > 50) {
             $signal = 'SELL';
         }
 
@@ -402,20 +394,8 @@ class CryptoAnalysisService
             $takeProfit = $price - ($atr * $takeProfitMultiplier);
         }
 
-        // Формирование причины сигнала с новыми критериями
-        $reason = $this->buildReason(
-            $price, 
-            $ema20, 
-            $ema50, 
-            $rsi, 
-            $macdLine, 
-            $macdHist, 
-            $signal,
-            $macdHistAtr,
-            $emaDistanceAtr,
-            $atrPct,
-            $scoreDiff
-        );
+        // Формирование причины сигнала
+        $reason = $this->buildReason($price, $ema20, $ema50, $rsi, $macdLine, $macdHist, $signal);
 
         return [
             'signal' => $signal,  // Для совместимости
@@ -429,9 +409,6 @@ class CryptoAnalysisService
             'macd_signal' => $macdSignalLine,
             'macd_histogram' => $macdHist,
             'atr' => $atr,
-            'macd_hist_atr' => $macdHistAtr,  // Нормализованный MACD histogram
-            'ema_distance_atr' => $emaDistanceAtr,  // Нормализованное расстояние EMA
-            'atr_pct' => $atrPct,  // ATR в процентах
             'stop_loss' => $stopLoss,
             'take_profit' => $takeProfit,
             'volume_ratio' => 1.0,
@@ -442,13 +419,12 @@ class CryptoAnalysisService
             'short_score' => $shortScore,
             'long_probability' => $longProb,
             'short_probability' => $shortProb,
-            'score_diff' => $scoreDiff,
             'reason' => $reason,
         ];
     }
 
     /**
-     * Формирование текста причины сигнала с ATR нормализацией
+     * Формирование текста причины сигнала
      */
     private function buildReason(
         float $price,
@@ -457,24 +433,18 @@ class CryptoAnalysisService
         float $rsi,
         float $macdLine,
         float $macdHist,
-        string $signal,
-        float $macdHistAtr,
-        float $emaDistanceAtr,
-        float $atrPct,
-        int $scoreDiff
+        string $signal
     ): string {
         $trend = $ema20 > $ema50 ? 'Bullish' : 'Bearish';
         $priceVsEma = $price > $ema20 ? 'above' : 'below';
         $macdStatus = $macdLine > 0 ? 'above zero' : 'below zero';
 
         return sprintf(
-            'RSI: %.2f | MACD Hist/ATR: %.3f | EMA Dist/ATR: %.3f | ATR%%: %.2f | Score Diff: %d | Trend: %s | Price %s EMA20',
-            $rsi,
-            $macdHistAtr,
-            $emaDistanceAtr,
-            $atrPct,
-            $scoreDiff,
+            'EMA20 vs EMA50: %s trend. RSI: %.2f. MACD %s, Histogram: %.2f. Price %s EMA20',
             $trend,
+            $rsi,
+            $macdStatus,
+            $macdHist,
             $priceVsEma
         );
     }

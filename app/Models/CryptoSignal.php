@@ -8,6 +8,7 @@ use Carbon\Carbon;
 class CryptoSignal extends Model
 {
     protected $fillable = [
+        'flow_id',
         'symbol',
         'strategy',
         'type',
@@ -39,6 +40,7 @@ class CryptoSignal extends Model
     ];
 
     protected $casts = [
+        'flow_id' => 'string',
         'price' => 'decimal:8',
         'rsi' => 'decimal:4',
         'ema' => 'decimal:8',
