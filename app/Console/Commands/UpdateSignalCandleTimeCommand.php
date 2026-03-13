@@ -8,86 +8,92 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
-class CheckSignalStatusCommand extends Command
+class UpdateSignalCandleTimeCommand extends Command
 {
-    protected $signature = 'signals:check-status
-                            {--hours=12 : Количество часов назад для проверки (по умолчанию 12)}
-                            {--range=24 : Диапазон проверки в часах (по умолчанию 24)}';
+    protected $signature = 'signals:update-candle-time
+                            {--flow-id= : Flow ID для фильтрации сигналов (опционально)}';
 
-    protected $description = 'Check status of signals (DONE/MISSED/PROCESSING) based on historical price data';
+    protected $description = 'Update updated_at field with candle open time when TP or SL was first hit (Binance time + 4 hours)';
 
     public function handle()
     {
         $startTime = microtime(true);
         $commandStart = Carbon::now();
 
-        $this->info('🔍 Checking signal statuses...');
-        Log::info('=== CheckSignalStatus Command Started ===', [
+        $this->info('🕐 Updating signal candle times...');
+        Log::info('=== UpdateSignalCandleTime Command Started ===', [
             'started_at' => $commandStart->toDateTimeString(),
-            'options' => [
-                'hours' => $this->option('hours'),
-                'range' => $this->option('range'),
-            ]
+            'flow_id' => $this->option('flow-id'),
         ]);
 
         try {
-            // Находим сигналы, которые нужно проверить
-            // По умолчанию проверяем сигналы от 12 до 36 часов назад (12 + 24 = 36)
-//            $hoursAgo = (int) $this->option('hours');
-//            $rangeHours = (int) $this->option('range');
-//
-//            $now = Carbon::now();
-//            $fromTime = $now->copy()->subHours($hoursAgo + $rangeHours);
-//            $toTime = $now->copy()->subHours($hoursAgo);
+            // Строим запрос с той же логикой фильтрации
+            $matchingSignalsQuery = CryptoSignal::query()
+                ->where('created_at', '>=', '2026-03-02 20:00:00')
+                ->whereNotNull('atr')
+                ->whereNotNull('ema')
+                ->whereNotNull('macd_histogram')
+                ->whereNotNull('take_profit')
+                ->where('price', '>', 0)
+                ->where('atr', '>', 0)
+                // 📏 TP distance filter: (ABS((price - take_profit) / price) * 100) <= 3
+                ->whereRaw('(ABS((price - take_profit) / price) * 100) <= 3')
+                ->whereIn('status', ['DONE', 'MISSED']) // Только DONE или MISSED
+                ->where(function ($q) {
+                    // ================= BUY =================
+                    $q->where(function ($buy) {
+                        $buy->where('type', 'BUY')
+                            // 1️⃣ RSI: rsi > 48 AND rsi < 60
+                            ->where('rsi', '>', 48)
+                            ->where('rsi', '<', 60)
+                            // 2️⃣ MACD histogram / ATR: (macd_histogram / atr) >= 0.25
+                            ->whereRaw('(macd_histogram / atr) >= 0.25')
+                            // 3️⃣ EMA distance % ATR: (ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5
+                            ->whereRaw('(ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5')
+                            // 4️⃣ ATR %: ((atr / price) * 100) BETWEEN 0.3 AND 3.0
+                            ->whereRaw('((atr / price) * 100) BETWEEN 0.3 AND 3.0')
+                            // 5️⃣ Score difference: (long_score - short_score) BETWEEN 10 AND 20
+                            ->whereRaw('(long_score - short_score) BETWEEN 10 AND 20');
+                    })
+                    // ================= SELL =================
+                    ->orWhere(function ($sell) {
+                        $sell->where('type', 'SELL')
+                            // 1️⃣ RSI: rsi BETWEEN 40 AND 52
+                            ->whereBetween('rsi', [40, 52])
+                            // 2️⃣ MACD histogram / ATR: (ABS(macd_histogram) / atr) >= 0.25
+                            ->whereRaw('(ABS(macd_histogram) / atr) >= 0.25')
+                            // 3️⃣ EMA distance % ATR: (ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5
+                            ->whereRaw('(ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5')
+                            // 4️⃣ ATR %: ((atr / price) * 100) BETWEEN 0.3 AND 3.0
+                            ->whereRaw('((atr / price) * 100) BETWEEN 0.3 AND 3.0')
+                            // 5️⃣ Score difference: (short_score - long_score) BETWEEN 10 AND 20
+                            ->whereRaw('(short_score - long_score) BETWEEN 10 AND 20');
+                    });
+                });
 
-//            $this->info("📅 Checking signals from {$fromTime->format('Y-m-d H:i:s')} to {$toTime->format('Y-m-d H:i:s')}");
-//            Log::info('CheckSignalStatus: Time range', [
-//                'from' => $fromTime->toDateTimeString(),
-//                'to' => $toTime->toDateTimeString(),
-//                'hours_ago' => $hoursAgo,
-//                'range_hours' => $rangeHours,
-//            ]);
+            // Если указан flow_id, добавляем фильтр
+            if ($this->option('flow-id')) {
+                $matchingSignalsQuery->where('flow_id', $this->option('flow-id'));
+            }
 
-            // Ищем сигналы без статуса или со статусом PROCESSING в указанном диапазоне
-            // Используем signal_time если есть, иначе created_at
-            $signals = CryptoSignal::where(function ($query) {
-                $query->whereNull('status')
-                      ->orWhere('status', 'PROCESSING');
-            })
-//            ->where(function ($query) use ($fromTime, $toTime) {
-//                $query->where(function ($q) use ($fromTime, $toTime) {
-//                    // Если есть signal_time, используем его
-//                    $q->whereNotNull('signal_time')
-//                      ->whereBetween('signal_time', [$fromTime, $toTime]);
-//                })->orWhere(function ($q) use ($fromTime, $toTime) {
-//                    // Иначе используем created_at
-//                    $q->whereNull('signal_time')
-//                      ->whereBetween('created_at', [$fromTime, $toTime]);
-//                });
-//            })
-            ->whereIn('type', ['BUY', 'SELL']) // Только BUY и SELL сигналы (не HOLD)
-            ->whereNotNull('stop_loss')
-            ->whereNotNull('take_profit')
-            ->get();
+            $signals = $matchingSignalsQuery->get();
 
             if ($signals->isEmpty()) {
-                $this->info('✅ No signals found in the specified time range');
-//                Log::info('CheckSignalStatus: No signals found', [
-//                    'from' => $fromTime->toDateTimeString(),
-//                    'to' => $toTime->toDateTimeString(),
-//                ]);
+                $this->info('✅ No signals found matching criteria');
+                Log::info('UpdateSignalCandleTime: No signals found', [
+                    'flow_id' => $this->option('flow-id'),
+                ]);
                 return Command::SUCCESS;
             }
 
-            $this->info("📊 Found {$signals->count()} signals to check");
-            Log::info('CheckSignalStatus: Signals found', [
+            $this->info("📊 Found {$signals->count()} signals to process");
+            Log::info('UpdateSignalCandleTime: Signals found', [
                 'count' => $signals->count(),
+                'flow_id' => $this->option('flow-id'),
                 'symbols' => $signals->pluck('symbol')->unique()->values()->toArray(),
             ]);
 
-            $doneCount = 0;
-            $missedCount = 0;
-            $processingCount = 0;
+            $updatedCount = 0;
             $errorCount = 0;
 
             $progressBar = $this->output->createProgressBar($signals->count());
@@ -95,37 +101,45 @@ class CheckSignalStatusCommand extends Command
 
             foreach ($signals as $signal) {
                 try {
-                    Log::debug("CheckSignalStatus: Checking signal", [
+                    Log::debug("UpdateSignalCandleTime: Processing signal", [
                         'signal_id' => $signal->id,
                         'symbol' => $signal->symbol,
                         'type' => $signal->type,
+                        'status' => $signal->status,
                         'signal_time' => $signal->signal_time?->toDateTimeString(),
                         'created_at' => $signal->created_at->toDateTimeString(),
                     ]);
 
-                    $status = $this->checkSignalStatus($signal);
-                    $signal->update(['status' => $status]);
+                    $candleTime = $this->findFirstHitCandleTime($signal);
 
-                    Log::info("CheckSignalStatus: Signal status updated", [
-                        'signal_id' => $signal->id,
-                        'symbol' => $signal->symbol,
-                        'old_status' => $signal->getOriginal('status'),
-                        'new_status' => $status,
-                    ]);
+                    if ($candleTime) {
+                        // Время от Binance + 4 часа
+                        $updatedAt = Carbon::createFromTimestamp($candleTime / 1000)->addHours(4);
 
-                    match($status) {
-                        'DONE' => $doneCount++,
-                        'MISSED' => $missedCount++,
-                        'PROCESSING' => $processingCount++,
-                        default => null
-                    };
+                        $signal->update(['updated_at' => $updatedAt]);
+
+                        Log::info("UpdateSignalCandleTime: Signal updated", [
+                            'signal_id' => $signal->id,
+                            'symbol' => $signal->symbol,
+                            'candle_open_time_ms' => $candleTime,
+                            'candle_open_time' => Carbon::createFromTimestamp($candleTime / 1000)->toDateTimeString(),
+                            'updated_at' => $updatedAt->toDateTimeString(),
+                        ]);
+
+                        $updatedCount++;
+                    } else {
+                        Log::warning("UpdateSignalCandleTime: Could not find candle time", [
+                            'signal_id' => $signal->id,
+                            'symbol' => $signal->symbol,
+                        ]);
+                    }
 
                     $progressBar->advance();
                     usleep(200000); // 0.2 секунды задержка между запросами
                 } catch (\Exception $e) {
                     $errorCount++;
-                    $errorMsg = "Error checking signal {$signal->id}: " . $e->getMessage();
-                    Log::error("CheckSignalStatus: Exception checking signal", [
+                    $errorMsg = "Error processing signal {$signal->id}: " . $e->getMessage();
+                    Log::error("UpdateSignalCandleTime: Exception processing signal", [
                         'signal_id' => $signal->id,
                         'symbol' => $signal->symbol,
                         'type' => $signal->type,
@@ -145,26 +159,23 @@ class CheckSignalStatusCommand extends Command
             $executionTime = round($endTime - $startTime, 2);
             $commandEnd = Carbon::now();
 
-            $this->info("✅ Status check complete!");
+            $this->info("✅ Update complete!");
             $this->table(
-                ['Status', 'Count'],
+                ['Metric', 'Count'],
                 [
-                    ['DONE', $doneCount],
-                    ['MISSED', $missedCount],
-                    ['PROCESSING', $processingCount],
-                    ['ERRORS', $errorCount],
+                    ['Updated', $updatedCount],
+                    ['Errors', $errorCount],
+                    ['Total', $signals->count()],
                 ]
             );
 
-            $this->info("⏱️  Время выполнения: {$executionTime} сек");
+            $this->info("⏱️  Execution time: {$executionTime} sec");
 
-            Log::info('=== CheckSignalStatus Command Completed ===', [
+            Log::info('=== UpdateSignalCandleTime Command Completed ===', [
                 'ended_at' => $commandEnd->toDateTimeString(),
                 'execution_time_seconds' => $executionTime,
                 'total_signals' => $signals->count(),
-                'done_count' => $doneCount,
-                'missed_count' => $missedCount,
-                'processing_count' => $processingCount,
+                'updated_count' => $updatedCount,
                 'error_count' => $errorCount,
             ]);
 
@@ -173,7 +184,7 @@ class CheckSignalStatusCommand extends Command
         } catch (\Exception $e) {
             $errorMsg = '❌ Error: ' . $e->getMessage();
             $this->error($errorMsg);
-            Log::error('CheckSignalStatus: Command failed with exception', [
+            Log::error('UpdateSignalCandleTime: Command failed with exception', [
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
@@ -184,20 +195,19 @@ class CheckSignalStatusCommand extends Command
     }
 
     /**
-     * Проверяет статус сигнала на основе исторических данных
-     * Проверяет свечи от времени создания сигнала до текущего момента в хронологическом порядке
-     * Формат свечи от Binance: [openTime, open, high, low, close, volume, closeTime, ...]
+     * Находит время открытия первой свечи, когда цена достигла TP или SL
+     * Возвращает время открытия свечи в миллисекундах или null
      */
-    private function checkSignalStatus(CryptoSignal $signal): string
+    private function findFirstHitCandleTime(CryptoSignal $signal): ?int
     {
         // Определяем время начала проверки (signal_time или created_at)
-        $signalTime = $signal->created_at;
+        $signalTime =  $signal->created_at;
 
         // Получаем исторические данные от времени открытия сигнала до сейчас
         $startTime = $signalTime->timestamp * 1000; // Binance требует миллисекунды
         $endTime = Carbon::now()->addHours(4)->timestamp * 1000;
 
-        Log::debug("CheckSignalStatus: Fetching historical data", [
+        Log::debug("UpdateSignalCandleTime: Fetching historical data", [
             'signal_id' => $signal->id,
             'symbol' => $signal->symbol,
             'signal_time' => $signalTime->toDateTimeString(),
@@ -210,14 +220,14 @@ class CheckSignalStatusCommand extends Command
         $allKlines = $this->fetchHistoricalKlines($signal->symbol, $interval, $startTime, $endTime);
 
         if (empty($allKlines)) {
-            Log::warning("CheckSignalStatus: No klines data received", [
+            Log::warning("UpdateSignalCandleTime: No klines data received", [
                 'signal_id' => $signal->id,
                 'symbol' => $signal->symbol,
             ]);
-            return 'PROCESSING'; // Если не удалось получить данные, оставляем в обработке
+            return null;
         }
 
-        Log::debug("CheckSignalStatus: Klines received", [
+        Log::debug("UpdateSignalCandleTime: Klines received", [
             'signal_id' => $signal->id,
             'symbol' => $signal->symbol,
             'klines_count' => count($allKlines),
@@ -236,11 +246,6 @@ class CheckSignalStatusCommand extends Command
                 continue;
             }
 
-            // Если свеча открылась ДО сигнала, но закрылась ПОСЛЕ, то мы проверяем high/low
-            // но понимаем, что цена могла достичь этих уровней в любой момент между openTime и closeTime
-            // Однако, если свеча закрылась после сигнала, то часть её жизни (от startTime до closeTime)
-            // точно относится к периоду после сигнала
-
             if ($signal->type === 'BUY') {
                 // BUY: SL ниже entry, TP выше entry
                 // Проверяем high/low свечи: цена упала до/ниже SL (low <= stop_loss) или поднялась до/выше TP (high >= take_profit)
@@ -251,7 +256,8 @@ class CheckSignalStatusCommand extends Command
                 if ($hitSL && $hitTP) {
                     // Оба события в одной свече - определяем что было раньше
                     // Если low коснулся/пробил SL, значит цена сначала упала = SL сработал первым = MISSED
-                    Log::info("CheckSignalStatus: BUY signal - both SL and TP hit", [
+                    // Но нам нужно время открытия свечи в любом случае
+                    Log::info("UpdateSignalCandleTime: BUY signal - both SL and TP hit", [
                         'signal_id' => $signal->id,
                         'symbol' => $signal->symbol,
                         'kline_time' => Carbon::createFromTimestamp($klineOpenTime / 1000)->toDateTimeString(),
@@ -260,27 +266,27 @@ class CheckSignalStatusCommand extends Command
                         'stop_loss' => $signal->stop_loss,
                         'take_profit' => $signal->take_profit,
                     ]);
-                    return 'MISSED';
+                    return $klineOpenTime;
                 } elseif ($hitSL) {
                     // Сначала коснулся SL (low <= stop_loss) - MISSED
-                    Log::info("CheckSignalStatus: BUY signal - SL hit", [
+                    Log::info("UpdateSignalCandleTime: BUY signal - SL hit", [
                         'signal_id' => $signal->id,
                         'symbol' => $signal->symbol,
                         'kline_time' => Carbon::createFromTimestamp($klineOpenTime / 1000)->toDateTimeString(),
                         'low' => $low,
                         'stop_loss' => $signal->stop_loss,
                     ]);
-                    return 'MISSED';
+                    return $klineOpenTime;
                 } elseif ($hitTP) {
                     // Сначала коснулся TP (high >= take_profit) - DONE
-                    Log::info("CheckSignalStatus: BUY signal - TP hit", [
+                    Log::info("UpdateSignalCandleTime: BUY signal - TP hit", [
                         'signal_id' => $signal->id,
                         'symbol' => $signal->symbol,
                         'kline_time' => Carbon::createFromTimestamp($klineOpenTime / 1000)->toDateTimeString(),
                         'high' => $high,
                         'take_profit' => $signal->take_profit,
                     ]);
-                    return 'DONE';
+                    return $klineOpenTime;
                 }
             } else {
                 // SELL: SL выше entry, TP ниже entry
@@ -292,7 +298,8 @@ class CheckSignalStatusCommand extends Command
                 if ($hitSL && $hitTP) {
                     // Оба события в одной свече - определяем что было раньше
                     // Если high коснулся/пробил SL, значит цена сначала поднялась = SL сработал первым = MISSED
-                    Log::info("CheckSignalStatus: SELL signal - both SL and TP hit", [
+                    // Но нам нужно время открытия свечи в любом случае
+                    Log::info("UpdateSignalCandleTime: SELL signal - both SL and TP hit", [
                         'signal_id' => $signal->id,
                         'symbol' => $signal->symbol,
                         'kline_time' => Carbon::createFromTimestamp($klineOpenTime / 1000)->toDateTimeString(),
@@ -301,38 +308,39 @@ class CheckSignalStatusCommand extends Command
                         'stop_loss' => $signal->stop_loss,
                         'take_profit' => $signal->take_profit,
                     ]);
-                    return 'MISSED';
+                    return $klineOpenTime;
                 } elseif ($hitSL) {
                     // Сначала коснулся SL (high >= stop_loss) - MISSED
-                    Log::info("CheckSignalStatus: SELL signal - SL hit", [
+                    Log::info("UpdateSignalCandleTime: SELL signal - SL hit", [
                         'signal_id' => $signal->id,
                         'symbol' => $signal->symbol,
                         'kline_time' => Carbon::createFromTimestamp($klineOpenTime / 1000)->toDateTimeString(),
                         'high' => $high,
                         'stop_loss' => $signal->stop_loss,
                     ]);
-                    return 'MISSED';
+                    return $klineOpenTime;
                 } elseif ($hitTP) {
                     // Сначала коснулся TP (low <= take_profit) - DONE
-                    Log::info("CheckSignalStatus: SELL signal - TP hit", [
+                    Log::info("UpdateSignalCandleTime: SELL signal - TP hit", [
                         'signal_id' => $signal->id,
                         'symbol' => $signal->symbol,
                         'kline_time' => Carbon::createFromTimestamp($klineOpenTime / 1000)->toDateTimeString(),
                         'low' => $low,
                         'take_profit' => $signal->take_profit,
                     ]);
-                    return 'DONE';
+                    return $klineOpenTime;
                 }
             }
         }
 
-        // Если прошли все свечи и не достигли ни TP, ни SL - все еще в процессе
-        Log::debug("CheckSignalStatus: No TP/SL hit, still processing", [
+        // Если прошли все свечи и не достигли ни TP, ни SL - не должно быть такого для DONE/MISSED
+        Log::warning("UpdateSignalCandleTime: No TP/SL hit found for DONE/MISSED signal", [
             'signal_id' => $signal->id,
             'symbol' => $signal->symbol,
+            'status' => $signal->status,
             'klines_checked' => count($allKlines),
         ]);
-        return 'PROCESSING';
+        return null;
     }
 
     /**
@@ -356,7 +364,7 @@ class CheckSignalStatusCommand extends Command
             $requestCount = 0;
             while ($currentStartTime < $endTime) {
                 $requestCount++;
-                Log::debug("CheckSignalStatus: Fetching klines (request #{$requestCount})", [
+                Log::debug("UpdateSignalCandleTime: Fetching klines (request #{$requestCount})", [
                     'symbol' => $normalizedSymbol,
                     'interval' => $interval,
                     'start_time' => $currentStartTime,
@@ -372,7 +380,7 @@ class CheckSignalStatusCommand extends Command
                 ]);
 
                 if (!$response->successful()) {
-                    Log::warning("CheckSignalStatus: Failed to fetch historical klines", [
+                    Log::warning("UpdateSignalCandleTime: Failed to fetch historical klines", [
                         'symbol' => $normalizedSymbol,
                         'http_status' => $response->status(),
                         'response_body' => $response->body(),
@@ -383,14 +391,14 @@ class CheckSignalStatusCommand extends Command
 
                 $klines = $response->json();
                 if (empty($klines) || !is_array($klines)) {
-                    Log::debug("CheckSignalStatus: Empty or invalid klines response", [
+                    Log::debug("UpdateSignalCandleTime: Empty or invalid klines response", [
                         'symbol' => $normalizedSymbol,
                         'request_number' => $requestCount,
                     ]);
                     break;
                 }
 
-                Log::debug("CheckSignalStatus: Klines received", [
+                Log::debug("UpdateSignalCandleTime: Klines received", [
                     'symbol' => $normalizedSymbol,
                     'klines_count' => count($klines),
                     'request_number' => $requestCount,
@@ -427,7 +435,7 @@ class CheckSignalStatusCommand extends Command
             return $allKlines;
 
         } catch (\Exception $e) {
-            Log::error("CheckSignalStatus: Exception fetching historical klines", [
+            Log::error("UpdateSignalCandleTime: Exception fetching historical klines", [
                 'symbol' => $symbol,
                 'normalized_symbol' => $normalizedSymbol ?? 'unknown',
                 'interval' => $interval,
@@ -440,4 +448,3 @@ class CheckSignalStatusCommand extends Command
         }
     }
 }
-

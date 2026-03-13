@@ -15,11 +15,17 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
+        // Статический админ-пользователь для входа в систему
+        // Email и пароль заданы жестко и могут быть изменены при необходимости.
+        // Пароль будет автоматически захеширован благодаря cast'у в модели User.
+        User::updateOrCreate(
+            [
+                'email' => 'admin@ema-rsi-macd.local',
+            ],
+            [
+                'name' => 'Admin',
+                'password' => 'RsiMacd!2026',
+            ]
+        );
     }
 }

@@ -19,9 +19,11 @@ return Application::configure(basePath: dirname(__DIR__))
         // Это соответствует таймфрейму 15m
         $schedule->command('crypto:ema-rsi-macd')
             ->everyFifteenMinutes()
-            ->withoutOverlapping()
+            ->withoutOverlapping(60) // Таймаут 60 минут - если команда выполняется дольше, мьютекс снимается
             ->onFailure(function () {
-                \Log::error('EMA+RSI+MACD command failed');
+                \Log::error('EMA+RSI+MACD command failed', [
+                    'timestamp' => now()->toDateTimeString(),
+                ]);
             })
             ->appendOutputTo(storage_path('logs/crypto-signals.log'));
 
@@ -34,6 +36,13 @@ return Application::configure(basePath: dirname(__DIR__))
                 \Log::error('CheckSignalStatus command failed');
             })
             ->appendOutputTo(storage_path('logs/signal-status-check.log'));
+
+        // Очистка истекших мьютексов каждые 5 минут
+        // Предотвращает блокировку команд из-за зависших мьютексов
+        $schedule->command('schedule:clear-mutex')
+            ->everyFiveMinutes()
+            ->withoutOverlapping()
+            ->appendOutputTo(storage_path('logs/schedule-mutex-clear.log'));
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

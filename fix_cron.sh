@@ -47,3 +47,7 @@ crontab -l | grep "ema-rsi+macd" && echo "✓ Задача найдена!" || e
 
 
 
+
+
+
+

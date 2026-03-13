@@ -37,6 +37,7 @@ class CryptoSignal extends Model
         'sent_to_telegram',
         'signal_time',
         'status',
+        'updated_at',
     ];
 
     protected $casts = [
@@ -73,7 +74,7 @@ class CryptoSignal extends Model
 
     /**
      * Проверка, нужно ли отправлять сигнал (проверка на дубликаты)
-     * 
+     *
      * @param string $symbol Символ (BTCUSDT)
      * @param string $type Тип сигнала (BUY/SELL)
      * @param string $strength Сила сигнала (STRONG/MEDIUM/WEAK)

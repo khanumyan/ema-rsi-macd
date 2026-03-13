@@ -51,6 +51,13 @@ class EmaRsiMacdCommand extends Command
      */
     public function handle(): int
     {
+        // Логируем запуск команды СРАЗУ для диагностики cron
+        Log::info('=== EMA+RSI+MACD Command Handle Called ===', [
+            'timestamp' => Carbon::now()->toDateTimeString(),
+            'memory_usage' => memory_get_usage(true),
+            'is_cron' => !$this->output->isVerbose() && !$this->option('verbose'),
+        ]);
+
         // Генерируем UUID потока для этого запуска команды
         $this->flowId = (string) Str::uuid();
 
@@ -171,6 +178,7 @@ class EmaRsiMacdCommand extends Command
             'total_signals' => count($this->analysisSignals),
             'success_count' => $successCount,
             'error_count' => $errorCount,
+            'flow_id' => $this->flowId,
         ]);
 
         return Command::SUCCESS;

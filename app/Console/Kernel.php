@@ -16,9 +16,11 @@ class Kernel extends ConsoleKernel
         // Это соответствует таймфрейму 15m
         $schedule->command('crypto:ema-rsi-macd')
             ->everyFifteenMinutes()
-            ->withoutOverlapping()
+            ->withoutOverlapping(60) // Таймаут 60 минут - если команда выполняется дольше, мьютекс снимается
             ->onFailure(function () {
-                \Log::error('EMA+RSI+MACD command failed');
+                \Log::error('EMA+RSI+MACD command failed', [
+                    'timestamp' => now()->toDateTimeString(),
+                ]);
             })
             ->appendOutputTo(storage_path('logs/crypto-signals.log'));
 
@@ -31,6 +33,16 @@ class Kernel extends ConsoleKernel
                 \Log::error('CheckSignalStatus command failed');
             })
             ->appendOutputTo(storage_path('logs/signal-status-check.log'));
+
+        // Обновление времени свечи для сигналов со статусом DONE/MISSED
+        // Запускается каждый час, чтобы обновить updated_at для завершенных сигналов
+        $schedule->command('signals:update-candle-time')
+            ->hourly()
+            ->withoutOverlapping()
+            ->onFailure(function () {
+                \Log::error('UpdateSignalCandleTime command failed');
+            })
+            ->appendOutputTo(storage_path('logs/update-candle-time.log'));
 
         // Альтернативный вариант: запуск в конкретное время
         // Например, каждые 15 минут в рабочее время (8:00 - 22:00 UTC)

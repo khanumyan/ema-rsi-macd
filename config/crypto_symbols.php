@@ -132,7 +132,6 @@ return [
         'CARV',
         'CATI',
         'CC',
-        'CELO',
         'CELR',
         'CETUS',
         'CFX',
@@ -550,6 +549,10 @@ return [
         'ZRX',
     ],
 ];
+
+
+
+
 
 
 

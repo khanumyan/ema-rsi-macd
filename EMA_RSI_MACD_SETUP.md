@@ -128,3 +128,7 @@ php artisan crypto:ema-rsi-macd --limit=500 --telegram
 
 
 
+
+
+
+
