@@ -155,9 +155,31 @@
             text-align: center;
             color: #6b7280;
         }
+
+        .home-link {
+            position: fixed;
+            top: 18px;
+            left: 18px;
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.6);
+            background: rgba(15, 23, 42, 0.9);
+            color: #e5e7eb;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+
+        .home-link:hover {
+            border-color: #a855f7;
+            color: #e9d5ff;
+            box-shadow: 0 6px 18px rgba(168, 85, 247, 0.4);
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body>
+    <a href="{{ url('/') }}" class="home-link">Главная</a>
     <div class="login-card">
         <div class="logo-container">
             <img src="{{ asset('images/trading-helper-logo.png') }}" alt="Trading Helper Logo" class="logo-image">

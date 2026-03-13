@@ -54,12 +54,36 @@
             position: absolute;
             top: 20px;
             left: 20px;
-            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
             color: #94a3b8;
-            cursor: default;
-            padding: 8px 12px;
-            border-radius: 8px;
-            background: rgba(15, 23, 42, 0.5);
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.7);
+        }
+
+        .home-chip {
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.7);
+            background: rgba(15, 23, 42, 0.9);
+            color: #e5e7eb;
+            text-decoration: none;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .home-chip:hover {
+            border-color: #a855f7;
+            color: #e9d5ff;
+            box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4);
+        }
+
+        .user-email {
+            font-size: 12px;
+            color: #9ca3af;
         }
 
         .header-title {
@@ -203,7 +227,8 @@
     <div class="container">
         <header class="header">
             <div class="user-info">
-                {{ auth()->user()->email ?? 'admin' }}
+                <a href="{{ route('dashboard') }}" class="home-chip">Главная</a>
+                <span class="user-email">{{ auth()->user()->email ?? 'admin' }}</span>
             </div>
 
             <form method="POST" action="{{ route('logout') }}">
