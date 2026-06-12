@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Trading Helper – Вход</title>
+    <title>Trading Helper – Регистрация</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * {
@@ -23,7 +23,7 @@
             padding: 20px 16px;
         }
 
-        .login-card {
+        .card {
             width: 100%;
             max-width: 420px;
             background: rgba(15, 23, 42, 0.9);
@@ -49,14 +49,8 @@
         }
 
         @keyframes fadeInScale {
-            from {
-                opacity: 0;
-                transform: scale(0.9);
-            }
-            to {
-                opacity: 1;
-                transform: scale(1);
-            }
+            from { opacity: 0; transform: scale(0.9); }
+            to   { opacity: 1; transform: scale(1); }
         }
 
         .header-title {
@@ -115,19 +109,14 @@
             box-shadow: 0 0 0 1px rgba(168, 85, 247, 0.7);
         }
 
-        .hint {
-            font-size: 11px;
-            color: #9ca3af;
-            margin-bottom: 8px;
-            line-height: 1.4;
+        .input.is-error {
+            border-color: rgba(248, 113, 113, 0.7);
         }
 
-        .hint code {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-            background: rgba(15, 23, 42, 0.9);
-            padding: 1px 4px;
-            border-radius: 4px;
-            color: #e5e7eb;
+        .field-error {
+            font-size: 11px;
+            color: #fca5a5;
+            margin-top: 4px;
         }
 
         .submit-btn {
@@ -151,9 +140,19 @@
 
         .footer-note {
             margin-top: 14px;
-            font-size: 11px;
+            font-size: 12px;
             text-align: center;
             color: #6b7280;
+        }
+
+        .footer-note a {
+            color: #a855f7;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+
+        .footer-note a:hover {
+            color: #ec4899;
         }
 
         .home-link {
@@ -180,13 +179,14 @@
 </head>
 <body>
     <a href="{{ url('/') }}" class="home-link">Главная</a>
-    <div class="login-card">
+
+    <div class="card">
         <div class="logo-container">
             <img src="{{ asset('images/trading-helper-logo.png') }}" alt="Trading Helper Logo" class="logo-image">
         </div>
 
         <h1 class="header-title">TRADING HELPER</h1>
-        <p class="header-subtitle">Вход в панель управления EMA + RSI + MACD</p>
+        <p class="header-subtitle">Создать аккаунт</p>
 
         @if ($errors->any())
             <div class="error-box">
@@ -196,8 +196,25 @@
             </div>
         @endif
 
-        <form method="POST" action="{{ route('login.post') }}">
+        <form method="POST" action="{{ route('register.post') }}">
             @csrf
+
+            <div class="form-group">
+                <label for="name" class="label">Имя</label>
+                <input
+                    type="text"
+                    id="name"
+                    name="name"
+                    value="{{ old('name') }}"
+                    required
+                    autofocus
+                    class="input {{ $errors->has('name') ? 'is-error' : '' }}"
+                    placeholder="Ваше имя"
+                >
+                @error('name')
+                    <div class="field-error">{{ $message }}</div>
+                @enderror
+            </div>
 
             <div class="form-group">
                 <label for="email" class="label">Email</label>
@@ -205,11 +222,14 @@
                     type="email"
                     id="email"
                     name="email"
-                    value="{{ old('email', 'admin@ema-rsi-macd.local') }}"
+                    value="{{ old('email') }}"
                     required
-                    autofocus
-                    class="input"
+                    class="input {{ $errors->has('email') ? 'is-error' : '' }}"
+                    placeholder="example@email.com"
                 >
+                @error('email')
+                    <div class="field-error">{{ $message }}</div>
+                @enderror
             </div>
 
             <div class="form-group">
@@ -219,23 +239,34 @@
                     id="password"
                     name="password"
                     required
+                    class="input {{ $errors->has('password') ? 'is-error' : '' }}"
+                    placeholder="Минимум 8 символов"
+                >
+                @error('password')
+                    <div class="field-error">{{ $message }}</div>
+                @enderror
+            </div>
+
+            <div class="form-group">
+                <label for="password_confirmation" class="label">Подтвердите пароль</label>
+                <input
+                    type="password"
+                    id="password_confirmation"
+                    name="password_confirmation"
+                    required
                     class="input"
+                    placeholder="Повторите пароль"
                 >
             </div>
 
             <button type="submit" class="submit-btn">
-                Войти
+                Зарегистрироваться
             </button>
         </form>
 
         <div class="footer-note">
-            Нет аккаунта? <a href="{{ route('register') }}" style="color:#a855f7;text-decoration:none;">Зарегистрироваться</a>
-        </div>
-
-        <div class="footer-note" style="margin-top:6px;">
-            Trading Helper · {{ now()->year }}
+            Уже есть аккаунт? <a href="{{ route('login') }}">Войти</a>
         </div>
     </div>
 </body>
 </html>
-

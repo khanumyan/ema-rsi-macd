@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\CryptoSignal;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
@@ -68,6 +69,8 @@ class CheckSignalStatusCommand extends Command
             ->whereIn('type', ['BUY', 'SELL']) // Только BUY и SELL сигналы (не HOLD)
             ->whereNotNull('stop_loss')
             ->whereNotNull('take_profit')
+//            ->where('sent_to_telegram', 1)
+        ->whereNull('flow_id')
             ->get();
 
             if ($signals->isEmpty()) {

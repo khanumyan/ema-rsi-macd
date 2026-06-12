@@ -1,10 +1,7 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Trading Helper – Сигналы и стратегии</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
+@extends('layouts.app')
+@section('page-title', 'Сигналы')
+@push('styles')
+<style>
         * {
             margin: 0;
             padding: 0;
@@ -326,51 +323,11 @@
             color: #9ca3af;
         }
     </style>
-</head>
-<body>
-    <div class="container">
-        <header class="header">
-            <div class="user-info">
-                <a href="{{ route('dashboard') }}" class="home-chip">Главная</a>
-                <span class="user-email">{{ auth()->user()->email ?? 'admin' }}</span>
-            </div>
-
-            <form method="POST" action="{{ route('logout') }}">
-                @csrf
-                <button type="submit" class="logout-btn">
-                    Выйти
-                </button>
-            </form>
-
-            <div class="logo-container">
-                <img src="{{ asset('images/trading-helper-logo.png') }}" alt="Trading Helper Logo" class="logo-image">
-            </div>
-
-            <h1 class="header-title">Сигналы и стратегии</h1>
-            <p class="header-subtitle">
-                История сигналов EMA + RSI + MACD с сильным и слабым фильтром, экспорт в Excel
-            </p>
-
-            <div class="tabs">
-                <button
-                    class="tab {{ $filter === 'strong' ? 'tab-active' : '' }}"
-                    onclick="window.location='{{ route('signals.index', array_filter(['filter' => 'strong', 'date_from' => $dateFrom, 'date_to' => $dateTo])) }}'"
-                >
-                    Сильный фильтр
-                </button>
-                <button
-                    class="tab {{ $filter === 'weak' ? 'tab-active' : '' }}"
-                    onclick="window.location='{{ route('signals.index', array_filter(['filter' => 'weak', 'date_from' => $dateFrom, 'date_to' => $dateTo])) }}'"
-                >
-                    Слабый фильтр
-                </button>
-            </div>
-        </header>
-
+@endpush
+@section('content')
+    <div class="container" style="max-width:100%;padding:0">
         <section class="filters-bar">
             <form method="GET" action="{{ route('signals.index') }}" class="filters-left">
-                <input type="hidden" name="filter" value="{{ $filter }}">
-
                 <div>
                     <label class="label" for="date_from">Дата от</label>
                     <input
@@ -402,7 +359,7 @@
 
             <div style="margin-top: 18px;">
                 <a
-                    href="{{ route('signals.export', array_filter(['filter' => $filter, 'date_from' => $dateFrom, 'date_to' => $dateTo])) }}"
+                    href="{{ route('signals.export', array_filter(['date_from' => $dateFrom, 'date_to' => $dateTo])) }}"
                     class="export-btn"
                 >
                     ⬇ Сохранить как Excel (CSV)
@@ -506,6 +463,5 @@
             @endif
         </section>
     </div>
-</body>
-</html>
+@endsection
 

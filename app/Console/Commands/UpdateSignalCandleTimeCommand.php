@@ -29,7 +29,7 @@ class UpdateSignalCandleTimeCommand extends Command
         try {
             // Строим запрос с той же логикой фильтрации
             $matchingSignalsQuery = CryptoSignal::query()
-                ->where('created_at', '>=', '2026-03-02 20:00:00')
+//                ->where('created_at', '>=', '2026-03-02 20:00:00')
                 ->whereNotNull('atr')
                 ->whereNotNull('ema')
                 ->whereNotNull('macd_histogram')
@@ -37,21 +37,22 @@ class UpdateSignalCandleTimeCommand extends Command
                 ->where('price', '>', 0)
                 ->where('atr', '>', 0)
                 // 📏 TP distance filter: (ABS((price - take_profit) / price) * 100) <= 3
-                ->whereRaw('(ABS((price - take_profit) / price) * 100) <= 3')
+                ->whereRaw('(ABS((price - take_profit) / price) * 100) <= 4.5')
                 ->whereIn('status', ['DONE', 'MISSED']) // Только DONE или MISSED
                 ->where(function ($q) {
                     // ================= BUY =================
                     $q->where(function ($buy) {
                         $buy->where('type', 'BUY')
                             // 1️⃣ RSI: rsi > 48 AND rsi < 60
-                            ->where('rsi', '>', 48)
-                            ->where('rsi', '<', 60)
+                            ->where('rsi', '>', 55)
+                            ->where('rsi', '<', 70)
+                            ->whereRaw('macd_histogram > 0.003')
                             // 2️⃣ MACD histogram / ATR: (macd_histogram / atr) >= 0.25
-                            ->whereRaw('(macd_histogram / atr) >= 0.25')
+                            ->whereRaw('(macd_histogram / atr) >= 0.4')
                             // 3️⃣ EMA distance % ATR: (ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5
-                            ->whereRaw('(ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5')
+                            ->whereRaw('(ABS(price - ema) / atr) BETWEEN 1.0 AND 1.8')
                             // 4️⃣ ATR %: ((atr / price) * 100) BETWEEN 0.3 AND 3.0
-                            ->whereRaw('((atr / price) * 100) BETWEEN 0.3 AND 3.0')
+                            ->whereRaw('((atr / price) * 100) BETWEEN 0.6 AND 3.5')
                             // 5️⃣ Score difference: (long_score - short_score) BETWEEN 10 AND 20
                             ->whereRaw('(long_score - short_score) BETWEEN 10 AND 20');
                     })
@@ -59,13 +60,14 @@ class UpdateSignalCandleTimeCommand extends Command
                     ->orWhere(function ($sell) {
                         $sell->where('type', 'SELL')
                             // 1️⃣ RSI: rsi BETWEEN 40 AND 52
-                            ->whereBetween('rsi', [40, 52])
+                            ->whereBetween('rsi', [40, 47])
                             // 2️⃣ MACD histogram / ATR: (ABS(macd_histogram) / atr) >= 0.25
-                            ->whereRaw('(ABS(macd_histogram) / atr) >= 0.25')
+                            ->whereRaw('macd_histogram < -0.002')
+                            ->whereRaw('(ABS(macd_histogram) / atr) >= 0.35')
                             // 3️⃣ EMA distance % ATR: (ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5
-                            ->whereRaw('(ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5')
+                            ->whereRaw('(ABS(price - ema) / atr) BETWEEN 0.8 AND 1.5')
                             // 4️⃣ ATR %: ((atr / price) * 100) BETWEEN 0.3 AND 3.0
-                            ->whereRaw('((atr / price) * 100) BETWEEN 0.3 AND 3.0')
+                            ->whereRaw('((atr / price) * 100) BETWEEN 0.5 AND 3.5')
                             // 5️⃣ Score difference: (short_score - long_score) BETWEEN 10 AND 20
                             ->whereRaw('(short_score - long_score) BETWEEN 10 AND 20');
                     });

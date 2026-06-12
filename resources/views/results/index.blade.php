@@ -1,10 +1,7 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Trading Helper – Результаты</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
+@extends('layouts.app')
+@section('page-title', 'Результаты')
+@push('styles')
+<style>
         * {
             margin: 0;
             padding: 0;
@@ -256,51 +253,11 @@
             color: #9ca3af;
         }
     </style>
-</head>
-<body>
-    <div class="container">
-        <header class="header">
-            <div class="user-info">
-                <a href="{{ route('dashboard') }}" class="home-chip">Главная</a>
-                <span class="user-email">{{ auth()->user()->email ?? 'admin' }}</span>
-            </div>
-
-            <form method="POST" action="{{ route('logout') }}">
-                @csrf
-                <button type="submit" class="logout-btn">
-                    Выйти
-                </button>
-            </form>
-
-            <div class="logo-container">
-                <img src="{{ asset('images/trading-helper-logo.png') }}" alt="Trading Helper Logo" class="logo-image">
-            </div>
-
-            <h1 class="header-title">Результаты стратегии</h1>
-            <p class="header-subtitle">
-                Ежедневная сводка по выполненным и пропущенным сигналам, средним стопам/тейкам и общему профиту.
-            </p>
-
-            <div class="tabs">
-                <button
-                    class="tab {{ $filter === 'strong' ? 'tab-active' : '' }}"
-                    onclick="window.location='{{ route('results.index', ['filter' => 'strong', 'capital' => $capital, 'leverage' => $leverage]) }}'"
-                >
-                    Сильный фильтр
-                </button>
-                <button
-                    class="tab {{ $filter === 'weak' ? 'tab-active' : '' }}"
-                    onclick="window.location='{{ route('results.index', ['filter' => 'weak', 'capital' => $capital, 'leverage' => $leverage]) }}'"
-                >
-                    Слабый фильтр
-                </button>
-            </div>
-        </header>
-
+@endpush
+@section('content')
+    <div class="container" style="max-width:100%;padding:0">
         <section class="controls">
             <form method="GET" action="{{ route('results.index') }}" style="display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-end;">
-                <input type="hidden" name="filter" value="{{ $filter }}">
-
                 <div class="field">
                     <label for="capital" class="label">Сумма входа (USD)</label>
                     <input
@@ -401,6 +358,5 @@
             </span>
         </div>
     </div>
-</body>
-</html>
+@endsection
 

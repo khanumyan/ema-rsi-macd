@@ -2,181 +2,89 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\SignalsExport;
 use App\Models\CryptoSignal;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\StreamedResponse;
+use Maatwebsite\Excel\Facades\Excel;
 
 class SignalController extends Controller
 {
-    private const EXCLUDED_SYMBOLS = [
-        'CELO', 'STRK', '4', 'SIGN', 'USDC', 'TA', 'KOMA', 'BTC',
-        'RLS', 'LAB', 'AGT', 'SKY', 'STG', 'G', 'LINEA', 'SCRT',
-        'ARK', 'XPIN', 'ESPORTS', 'API3', 'HBAR',
-    ];
-
     public function index(Request $request)
     {
-        $filter = $request->query('filter', 'strong'); // strong | weak
         $dateFrom = $request->query('date_from');
-        $dateTo = $request->query('date_to');
+        $dateTo   = $request->query('date_to');
 
-        $query = $this->buildBaseQuery($filter, $dateFrom, $dateTo);
+        $query = $this->buildBaseQuery($dateFrom, $dateTo);
 
         $signals = $query->paginate(50)->withQueryString();
 
         return view('signals.index', [
-            'signals' => $signals,
-            'filter' => $filter,
+            'signals'  => $signals,
             'dateFrom' => $dateFrom,
-            'dateTo' => $dateTo,
+            'dateTo'   => $dateTo,
         ]);
     }
 
-    public function export(Request $request): StreamedResponse
+    public function export(Request $request)
     {
-        $filter = $request->query('filter', 'strong');
         $dateFrom = $request->query('date_from');
-        $dateTo = $request->query('date_to');
+        $dateTo   = $request->query('date_to');
 
-        $query = $this->buildBaseQuery($filter, $dateFrom, $dateTo);
+        $query = $this->buildBaseQuery($dateFrom, $dateTo);
 
         $columns = [
-            'signal_time',
-            'created_at',
-            'symbol',
-            'strategy',
-            'type',
-            'strength',
-            'price',
-            'rsi',
-            'ema',
-            'ema_slow',
-            'macd',
-            'macd_signal',
-            'macd_histogram',
-            'atr',
-            'stop_loss',
-            'take_profit',
-            'long_score',
-            'short_score',
-            'long_probability',
-            'short_probability',
-            'interval',
-            'limit',
-            'volume_ratio',
-            'htf_trend',
-            'htf_rsi',
-            'ltf_rsi',
-            'reason',
-            'sent_to_telegram',
-            'status',
+            'signal_time', 'created_at', 'updated_at', 'symbol', 'strategy',
+            'type', 'strength', 'price', 'rsi', 'ema', 'ema_slow',
+            'macd', 'macd_signal', 'macd_histogram', 'atr',
+            'stop_loss', 'take_profit', 'long_score', 'short_score',
+            'long_probability', 'short_probability', 'interval', 'limit',
+            'volume_ratio', 'htf_trend', 'htf_rsi', 'ltf_rsi',
+            'reason', 'sent_to_telegram', 'status',
         ];
 
-        $suffix = $filter === 'weak' ? 'weak' : 'strong';
-        $datePart = Carbon::now()->format('Y-m-d_H-i');
-        $fileName = "signals_{$suffix}_{$datePart}.csv";
+        $fileName = 'signals_' . Carbon::now()->format('Y-m-d_H-i') . '.xlsx';
 
-        $callback = static function () use ($query, $columns) {
-            $handle = fopen('php://output', 'w');
-
-            // Headers row
-            fputcsv($handle, $columns);
-
-            $query->chunk(500, function ($chunk) use ($handle, $columns) {
-                foreach ($chunk as $signal) {
-                    $row = [];
-                    foreach ($columns as $column) {
-                        $value = $signal->{$column};
-                        if ($value instanceof Carbon) {
-                            $value = $value->toDateTimeString();
-                        }
-                        $row[] = $value;
-                    }
-                    fputcsv($handle, $row);
-                }
-            });
-
-            fclose($handle);
-        };
-
-        return response()->streamDownload(
-            $callback,
-            $fileName,
-            [
-                'Content-Type' => 'text/csv; charset=UTF-8',
-                'Cache-Control' => 'no-store, no-cache, must-revalidate',
-            ]
-        );
+        return Excel::download(new SignalsExport($query, $columns), $fileName);
     }
 
-    private function buildBaseQuery(string $filter, ?string $dateFrom, ?string $dateTo)
+    private function buildBaseQuery(?string $dateFrom, ?string $dateTo)
     {
-        $base = CryptoSignal::query()
+        $query = CryptoSignal::query()
             ->whereNotNull('atr')
             ->whereNotNull('ema')
             ->whereNotNull('macd_histogram')
             ->whereNotNull('take_profit')
             ->where('price', '>', 0)
             ->where('atr', '>', 0)
-            ->whereRaw('(ABS((price - take_profit) / price) * 100) <= 3')
-            ->whereNotIn('symbol', self::EXCLUDED_SYMBOLS);
-
-        if ($dateFrom) {
-            $base->whereDate('signal_time', '>=', $dateFrom);
-        }
-
-        if ($dateTo) {
-            $base->whereDate('signal_time', '<=', $dateTo);
-        }
-
-        if ($filter === 'weak') {
-            $base->where(function ($q) {
-                // Weak BUY
+            ->where(function ($q) {
                 $q->where(function ($buy) {
                     $buy->where('type', 'BUY')
-                        ->whereBetween('rsi', [48, 60])
-                        ->whereRaw('(macd_histogram / atr) >= 0.25')
-                        ->whereRaw('(ABS(price - ema) / atr) BETWEEN 0.5 AND 1.5')
-                        ->whereRaw('((atr / price) * 100) BETWEEN 0.3 AND 3.0')
-                        ->whereRaw('(long_score - short_score) BETWEEN 10 AND 20');
+                        ->whereRaw('macd < 0')
+                        ->whereRaw('macd_histogram > 0')
+                        ->whereBetween('rsi', [50, 60])
+                        ->whereRaw('(atr / price) * 100 > 3.5')
+                        ->whereRaw('ema < ema_slow');
                 })
-                // Weak SELL
                 ->orWhere(function ($sell) {
                     $sell->where('type', 'SELL')
-                        ->whereBetween('rsi', [40, 52])
-                        ->whereRaw('(ABS(macd_histogram) / atr) >= 0.25')
-                        ->whereRaw('(ABS(price - ema) / atr) BETWEEN 0.5 AND 2')
-                        ->whereRaw('((atr / price) * 100) BETWEEN 0.3 AND 3.0')
-                        ->whereRaw('(short_score - long_score) BETWEEN 10 AND 20');
-                });
-            })
-            ->orderBy('signal_time', 'asc');
-        } else {
-            $base->where(function ($q) {
-                // Strong BUY
-                $q->where(function ($buy) {
-                    $buy->where('type', 'BUY')
-                        ->whereBetween('rsi', [55, 70])
-                        ->whereRaw('(macd_histogram / atr) >= 0.4')
-                        ->whereRaw('(ABS(price - ema) / atr) BETWEEN 1.0 AND 1.8')
-                        ->whereRaw('((atr / price) * 100) BETWEEN 0.6 AND 2.0')
-                        ->whereRaw('(long_score - short_score) BETWEEN 10 AND 20');
-                })
-                // Strong SELL
-                ->orWhere(function ($sell) {
-                    $sell->where('type', 'SELL')
-                        ->whereBetween('rsi', [35, 48])
-                        ->whereRaw('(ABS(macd_histogram) / atr) >= 0.35')
-                        ->whereRaw('(ABS(price - ema) / atr) BETWEEN 0.8 AND 1.5')
-                        ->whereRaw('((atr / price) * 100) BETWEEN 0.5 AND 2.5')
-                        ->whereRaw('(short_score - long_score) BETWEEN 10 AND 20');
+                        ->whereRaw('macd < 0')
+                        ->whereRaw('macd_histogram < 0')
+                        ->whereBetween('rsi', [35, 40])
+                        ->whereRaw('(atr / price) * 100 BETWEEN 0.3 AND 0.6')
+                        ->whereRaw('ema > ema_slow');
                 });
             })
             ->orderBy('signal_time', 'desc');
+
+        if ($dateFrom) {
+            $query->whereDate('signal_time', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $query->whereDate('signal_time', '<=', $dateTo);
         }
 
-        return $base;
+        return $query;
     }
 }
 

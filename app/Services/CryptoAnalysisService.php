@@ -259,6 +259,22 @@ class CryptoAnalysisService
      */
     public function analyzeEmaRsiMacd(string $symbol, array $params = []): array
     {
+        $interval = $params['interval'] ?? '15m';
+        $limit = $params['limit'] ?? 200;
+
+        // Получаем данные с биржи
+        $klines = $this->fetchKlines($symbol, $interval, $limit);
+
+        return $this->analyzeEmaRsiMacdFromKlines($klines, $params);
+    }
+
+    /**
+     * Анализ стратегии EMA+RSI+MACD по уже загруженным свечам.
+     *
+     * Формат свечи Binance: [openTime, open, high, low, close, volume, closeTime, ...]
+     */
+    public function analyzeEmaRsiMacdFromKlines(array $klines, array $params = []): array
+    {
         // Параметры по умолчанию
         $emaFast = $params['ema_fast'] ?? 20;
         $emaSlow = $params['ema_slow'] ?? 50;
@@ -266,14 +282,13 @@ class CryptoAnalysisService
         $macdFast = $params['macd_fast'] ?? 12;
         $macdSlow = $params['macd_slow'] ?? 26;
         $macdSignal = $params['macd_signal'] ?? 9;
-        $interval = $params['interval'] ?? '15m';
-        $limit = $params['limit'] ?? 200;
         $atrPeriod = $params['atr_period'] ?? 14;
-        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 2.3;
-        $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 2.0;
+        $stopLossMultiplier = $params['stop_loss_multiplier'] ?? 3.3;
+        $takeProfitMultiplier = $params['take_profit_multiplier'] ?? 2.5;
 
-        // Получаем данные с биржи
-        $klines = $this->fetchKlines($symbol, $interval, $limit);
+        if (count($klines) < 100) {
+            throw new Exception('Insufficient klines data: need at least 100 candles');
+        }
 
         // Извлекаем массивы цен
         $closes = array_map(fn($k) => (float) $k[4], $klines); // [4] = close price

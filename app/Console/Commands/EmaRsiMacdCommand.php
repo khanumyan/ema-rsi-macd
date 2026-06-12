@@ -3,6 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Models\CryptoSignal;
+use App\Models\Profile;
+use App\Services\BinanceFuturesService;
 use App\Services\CryptoAnalysisService;
 use App\Services\TelegramService;
 use Illuminate\Console\Command;
@@ -166,6 +168,9 @@ class EmaRsiMacdCommand extends Command
 
         // Фильтрация сигналов текущего потока по дополнительным критериям
         $this->filterFlowSignals();
+
+        // Открытие позиций на Binance Futures по активным профилям (TEST → testnet, PROD → prod)
+        $this->openFuturesPositionsForFlow();
 
         $endTime = microtime(true);
         $executionTime = round($endTime - $startTime, 2);
@@ -642,5 +647,132 @@ class EmaRsiMacdCommand extends Command
             'matched' => $matchedCount,
             'deleted' => $deletedCount,
         ]);
+    }
+
+    /**
+     * Открытие позиций на Binance Futures по сигналам текущего потока.
+     * Берёт из profiles активные записи: category TEST → testnet (demo-fapi.binance.com),
+     * category PROD → prod (fapi.binance.com). По каждому профилю с API Key + Secret
+     * выставляет cross margin, плечо 1, объём на 1 USDT, выставляет SL и TP из сигнала.
+     * Учитывает rate limit задержкой между запросами.
+     */
+    private function openFuturesPositionsForFlow(): void
+    {
+        $signals = CryptoSignal::where('flow_id', $this->flowId)
+            ->whereIn('type', ['BUY', 'SELL'])
+            ->whereNotNull('stop_loss')
+            ->whereNotNull('take_profit')
+            ->orderBy('id')
+            ->get();
+
+        if ($signals->isEmpty()) {
+            Log::info('EMA+RSI+MACD: No signals to open positions', ['flow_id' => $this->flowId]);
+            return;
+        }
+
+        $profiles = Profile::where('is_active', true)
+            ->whereIn('category', [Profile::CATEGORY_TEST, Profile::CATEGORY_PROD])
+            ->whereNotNull('profile_secret')
+            ->where('profile_secret', '!=', '')
+            ->get();
+
+        if ($profiles->isEmpty()) {
+            Log::info('EMA+RSI+MACD: No active profiles with secret for futures');
+            return;
+        }
+
+        $delayMs = 280;
+        $totalCalls = $profiles->count() * $signals->count() * 5; // marginType, leverage, order, SL, TP
+        $this->info("📤 Открытие позиций: {$signals->count()} сигналов × {$profiles->count()} профилей (задержка {$delayMs} ms между запросами)");
+        Log::info('EMA+RSI+MACD: Opening futures positions', [
+            'flow_id' => $this->flowId,
+            'signals_count' => $signals->count(),
+            'profiles_count' => $profiles->count(),
+        ]);
+
+        foreach ($profiles as $profile) {
+            $baseUrl = $profile->category === Profile::CATEGORY_PROD
+                ? BinanceFuturesService::productionBaseUrl()
+                : BinanceFuturesService::testnetBaseUrl();
+            $envLabel = $profile->category === Profile::CATEGORY_PROD ? 'PROD' : 'TEST';
+
+            try {
+                $client = new BinanceFuturesService(
+                    $baseUrl,
+                    $profile->profile_token,
+                    $profile->profile_secret
+                );
+            } catch (\Throwable $e) {
+                Log::error('EMA+RSI+MACD: Invalid profile credentials', [
+                    'profile_id' => $profile->id,
+                    'profile_name' => $profile->profile_name,
+                    'error' => $e->getMessage(),
+                ]);
+                $this->warn("  ⚠️ Профиль {$profile->profile_name} ({$envLabel}): ошибка инициализации");
+                continue;
+            }
+
+            $client->getExchangeInfo();
+
+            foreach ($signals as $signal) {
+                $symbol = $signal->symbol;
+                if (!str_ends_with(strtoupper($symbol), 'USDT')) {
+                    $symbol = strtoupper($symbol) . 'USDT';
+                }
+                $price = (float) $signal->price;
+                $markPrice = $client->getMarkPrice($symbol);
+                if ($markPrice !== null) {
+                    $price = $markPrice;
+                }
+                $side = $signal->type === 'BUY' ? 'BUY' : 'SELL';
+                $quantity = $client->quantityForNotionalForSymbol($symbol, $price, 10.0);
+                $stopLoss = (string) round((float) $signal->stop_loss, 8);
+                $takeProfit = (string) round((float) $signal->take_profit, 8);
+
+                if ((float) $quantity <= 0) {
+                    Log::warning('EMA+RSI+MACD: Skip signal invalid quantity', ['signal_id' => $signal->id, 'price' => $price]);
+                    continue;
+                }
+
+                $leverage = min(20, $client->getMaxLeverage($symbol));
+
+                $steps = [
+                    ['marginType', fn() => $client->setMarginType($symbol, 'ISOLATED')],
+                    ['leverage', fn() => $client->setLeverage($symbol, $leverage)],
+                    ['order', fn() => $client->placeMarketOrder($symbol, $side, $quantity)],
+                    ['stopLoss', fn() => $client->placeStopLossMarket($symbol, $side === 'BUY' ? 'SELL' : 'BUY', $quantity, $stopLoss)],
+                    ['takeProfit', fn() => $client->placeTakeProfitMarket($symbol, $side === 'BUY' ? 'SELL' : 'BUY', $quantity, $takeProfit)],
+                ];
+
+                foreach ($steps as [$step, $call]) {
+                    usleep($delayMs * 1000);
+                    $result = $call();
+                    if (isset($result['_error'])) {
+                        $msg = $result['_error'];
+                        if (str_contains($msg, 'No need to change margin type') || str_contains($msg, 'No need to change leverage')) {
+                            continue;
+                        }
+                        if (strtolower(trim($msg)) === 'success') {
+                            continue;
+                        }
+                        if (str_contains($msg, 'Invalid symbol') || str_contains($msg, 'Symbol is closed')) {
+                            Log::warning('EMA+RSI+MACD: Skip symbol not on futures or closed', ['symbol' => $symbol]);
+                            $this->warn("  ⚠️ {$symbol}: символ недоступен или закрыт на фьючерсах, пропуск");
+                            break;
+                        }
+                        Log::warning('EMA+RSI+MACD: Futures step failed', [
+                            'profile' => $profile->profile_name,
+                            'symbol' => $symbol,
+                            'step' => $step,
+                            'error' => $msg,
+                        ]);
+                        $this->warn("  ⚠️ {$profile->profile_name} {$symbol} {$step}: {$msg}");
+                        break;
+                    }
+                }
+            }
+        }
+
+        Log::info('EMA+RSI+MACD: Futures positions phase completed', ['flow_id' => $this->flowId]);
     }
 }

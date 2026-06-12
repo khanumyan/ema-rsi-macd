@@ -43,6 +43,12 @@ return Application::configure(basePath: dirname(__DIR__))
             ->everyFiveMinutes()
             ->withoutOverlapping()
             ->appendOutputTo(storage_path('logs/schedule-mutex-clear.log'));
+
+        // Крипто-новости: загрузка из newsdata.io и отправка в Telegram (пауза 1 мин между отправками)
+        $schedule->command('crypto:fetch-news')
+            ->hourly()
+            ->withoutOverlapping(90) // не запускать повторно 90 мин (команда может долго идти из-за пауз)
+            ->appendOutputTo(storage_path('logs/crypto-news.log'));
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
